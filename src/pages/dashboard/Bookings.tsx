@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { API_BASE_URL } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
 
 interface Booking {
     id: number;
@@ -26,6 +27,8 @@ interface Booking {
 }
 
 export default function BookingsPage() {
+    const { user } = useAuth();
+    const canDelete = user?.role === 'owner' || user?.role === 'admin';
     const [bookings, setBookings] = useState<Booking[]>([]);
     const [loading, setLoading] = useState(true);
     const [filterStatus, setFilterStatus] = useState<string>('active');
@@ -196,6 +199,29 @@ export default function BookingsPage() {
         }
     };
 
+    const deleteBooking = async (booking: Booking) => {
+        if (!canDelete || updatingBookingIds.has(booking.id)) return;
+        if (!window.confirm(`Hapus booking #${booking.id} (${booking.customerName}, ${booking.bookingDate.slice(0, 10)} ${booking.timeSlot}) secara permanen? Tindakan ini tidak dapat dibatalkan. Transaksi dan file bukti transfer tidak dihapus; tidak ada refund otomatis.`)) return;
+        setUpdatingBookingIds(prev => new Set(prev).add(booking.id));
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`${API_BASE_URL}/bookings/${booking.id}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || 'Gagal menghapus booking');
+            }
+            setBookings(prev => prev.filter(item => item.id !== booking.id));
+            await fetchBookings();
+        } catch (error) {
+            alert(error instanceof Error ? error.message : 'Gagal menghapus booking. Silakan coba lagi.');
+        } finally {
+            setUpdatingBookingIds(prev => { const ids = new Set(prev); ids.delete(booking.id); return ids; });
+        }
+    };
+
     const isBookingEnded = (booking: Booking): boolean => {
         const slotMatch = booking.timeSlot?.match(/^(\d{2}):(\d{2})\s*-\s*(\d{2}):(\d{2})$/);
         if (!slotMatch) return true; // fallback: jika format aneh, izinkan
@@ -356,6 +382,18 @@ export default function BookingsPage() {
                             </div>
 
                             {/* Actions */}
+                            {canDelete && (
+                                <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    className="mt-4"
+                                    disabled={updatingBookingIds.has(booking.id)}
+                                    onClick={() => deleteBooking(booking)}
+                                    aria-label={`Hapus booking #${booking.id}`}
+                                >
+                                    {updatingBookingIds.has(booking.id) ? 'Memproses...' : 'Hapus Booking'}
+                                </Button>
+                            )}
                             {booking.status === 'pending' && (
                                 <div className="flex gap-2 mt-4">
                                     <Button
